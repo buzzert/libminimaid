@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <libusb-1.0/libusb.h>
 
 static const int MM_VENDOR_ID  = 0xBEEF;
@@ -23,6 +24,8 @@ static const int LIGHTS_INTERFACE = 1;
 
 static const unsigned int IO_TIMEOUT_MS = 5000;
 
+#define LUSB_LOG(code) _log_libusb_error((code), __func__)
+
 struct Minimaid {
 	int device_ready;
 
@@ -31,7 +34,7 @@ struct Minimaid {
 
 static const unsigned MinimaidLightsStateRawLength = 32;
 struct MinimaidLightsState {
-	char *raw_light_data;
+	unsigned char *raw_light_data;
 };
 
 typedef struct { unsigned index; unsigned offset; } LightMapping;
@@ -79,6 +82,10 @@ static uint64_t _InputMapping[MinimaidInputCount] = {
 	[MinimaidInputP2MenuRight]  = (1ULL << 39),
 };
 
+void _log_libusb_error(int error_code, const char *calling_function) {
+	fprintf(stderr, "Minimaid: %s libusb error: %s\n", calling_function, libusb_error_name(error_code));
+}
+
 Minimaid* mm_open_connection(void) {
 	struct libusb_device_handle *device = NULL;
 
@@ -91,12 +98,20 @@ Minimaid* mm_open_connection(void) {
 		device = libusb_open_device_with_vid_pid(NULL, MM_VENDOR_ID, MM_PRODUCT_ID);
 		if (device != NULL) {
 			// Detach from HID to use with libusb
-			libusb_detach_kernel_driver(device, INPUT_INTERFACE);
+			int libusb_error = 0;
+			
+			libusb_error = libusb_detach_kernel_driver(device, INPUT_INTERFACE);
+			LUSB_LOG(libusb_error);
+
 			libusb_detach_kernel_driver(device, LIGHTS_INTERFACE);
+			LUSB_LOG(libusb_error);
 			
 			// Claim the device
 			result  = libusb_claim_interface(device, LIGHTS_INTERFACE);
+			LUSB_LOG(libusb_error);
+
 			result &= libusb_claim_interface(device, INPUT_INTERFACE);
+			LUSB_LOG(libusb_error);
 			
 			device_ready = (result == 0);
 			if (device_ready) {
@@ -112,7 +127,11 @@ Minimaid* mm_open_connection(void) {
 			} else {
 				fprintf(stderr, "Minimaid: Could not open device\n");
 			}
+		} else {
+			fprintf(stderr, "Minimaid: Couldn't find device (plugged in?)\n");
 		}
+	} else {
+		LUSB_LOG(result);
 	}
 
 	return mm_device;
@@ -137,7 +156,7 @@ void mm_close_connection(Minimaid *c) {
 /* Lights */
 
 MinimaidLightsState* mm_get_lights_state(Minimaid *c) {
-	char *raw_state = calloc(MinimaidLightsStateRawLength, 1);
+	unsigned char *raw_state = calloc(MinimaidLightsStateRawLength, 1);
 	int bytes_transferred = libusb_control_transfer(
 		c->dev_handle,
 		CONTROL_REQUEST_TYPE_OUT,
@@ -238,7 +257,7 @@ uint64_t mm_get_current_keyfield(Minimaid *c) {
 		HID_GET_REPORT,
 		(HID_REPORT_TYPE_INPUT << 8) | 0x00,
 		INPUT_INTERFACE,
-		(char*)&keys,
+		(unsigned char*)&keys,
 		sizeof(keys),
 		IO_TIMEOUT_MS
 	);

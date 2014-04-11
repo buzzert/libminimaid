@@ -1,5 +1,7 @@
 #include "minimaid.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <signal.h>
 
@@ -86,6 +88,11 @@ int main(int argc, char **argv) {
 	}
 
 	__mm = mm_open_connection();
+	if (!__mm) {
+		fprintf(stderr, "Couldn't get device\n");
+		return 1;
+	}
+
 	signal(SIGINT, signal_handler);
 
 	if (strcmp(argv[1], "cycle") == 0)
